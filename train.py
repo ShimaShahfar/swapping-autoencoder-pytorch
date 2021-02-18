@@ -19,7 +19,9 @@ except ImportError:
     wandb = None
 
 from model import Encoder, Generator, Discriminator, CooccurDiscriminator
-from stylegan2.dataset import MultiResolutionDataset
+from stylegan2 import MultiResolutionDataset
+from stylegan2.datasets.seasons import Seasons
+
 from stylegan2.distributed import (
     get_rank,
     synchronize,
@@ -114,7 +116,8 @@ def patchify_image(img, n_crop, min_size=1 / 8, max_size=1 / 4):
 
 def train(
     args,
-    loader,
+    loader_1,
+    loader_2,
     encoder,
     generator,
     discriminator,
@@ -125,7 +128,9 @@ def train(
     g_ema,
     device,
 ):
-    loader = sample_data(loader)
+    load_1 = sample_data(loader_1)
+    load_2 = sample_data(loader_2)
+
 
     pbar = range(args.iter)
 
@@ -159,7 +164,9 @@ def train(
 
             break
 
-        real_img = next(loader)
+        img_1 = next(load_1)
+        img_2 = next(load_2)
+        real_img = torch.cat((img_1, img_2), 0)
         real_img = real_img.to(device)
 
         requires_grad(encoder, False)
@@ -299,16 +306,17 @@ def train(
                     g_ema.eval()
 
                     structure1, texture1 = e_ema(real_img1)
-                    _, texture2 = e_ema(real_img2)
+                    structure2, texture2 = e_ema(real_img2)
 
                     fake_img1 = g_ema(structure1, texture1)
                     fake_img2 = g_ema(structure1, texture2)
+                    fake_img3 = g_ema(structure2, texture1)
 
-                    sample = torch.cat((fake_img1, fake_img2), 0)
+                    sample = torch.cat((real_img1, real_img2, fake_img1, fake_img2, fake_img3), 0)
 
                     utils.save_image(
                         sample,
-                        f"sample/{str(i).zfill(6)}.png",
+                        f"sample_summer/{str(i).zfill(6)}.png",
                         nrow=int(sample.shape[0] ** 0.5),
                         normalize=True,
                         range=(-1, 1),
@@ -327,7 +335,7 @@ def train(
                         "d_optim": d_optim.state_dict(),
                         "args": args,
                     },
-                    f"checkpoint/{str(i).zfill(6)}.pt",
+                    f"checkpoint_summer/{str(i).zfill(6)}.pt",
                 )
 
 
@@ -456,25 +464,36 @@ if __name__ == "__main__":
         ]
     )
 
-    datasets = []
+    # datasets = []
 
-    for path in args.path:
-        dataset = MultiResolutionDataset(path, transform, args.size)
-        datasets.append(dataset)
+    # for path in args.path:
+    #     dataset = Seasons(path)
+    #     datasets.append(dataset)
 
-    loader = data.DataLoader(
-        data.ConcatDataset(datasets),
-        batch_size=args.batch,
-        sampler=data_sampler(dataset, shuffle=True, distributed=args.distributed),
+    summer = Seasons(args.path[0])
+    winter = Seasons(args.path[1])
+
+    loader_1 = data.DataLoader(
+        summer,
+        batch_size= 8,
+        sampler=data_sampler(summer, shuffle=True, distributed=args.distributed),
         drop_last=True,
     )
+    loader_2 = data.DataLoader(
+        winter,
+        batch_size= 8,
+        sampler=data_sampler(winter, shuffle=True, distributed=args.distributed),
+        drop_last=True,
+    )
+    
 
     if get_rank() == 0 and wandb is not None and args.wandb:
         wandb.init(project="swapping autoencoder")
 
     train(
         args,
-        loader,
+        loader_1,
+        loader_2,
         encoder,
         generator,
         discriminator,
