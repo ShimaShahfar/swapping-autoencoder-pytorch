@@ -130,3 +130,13 @@ dmypy.json
 
 wandb/
 *.lmdb
+sample/
+sample_inria/
+sample_ffhq/
+sample_summer/
+sample_cityscapes/
+checkpoint/
+checkpoint_inria/
+checkpoint_ffhq/
+checkpoint_summer/
+checkpoint_cityscapes/
